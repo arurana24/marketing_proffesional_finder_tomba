@@ -47,10 +47,12 @@ def fetch_fallback_public_leads(company_name, target_domain, status_container, e
         with DDGS() as ddgs:
             for keyword in keyword_filters:
                 query = f"site:linkedin.com/in/ {company_name} India {keyword}"
-                time.sleep(random.uniform(1.5, 2.5))  # High-stability human sleep pacing
+                time.sleep(random.uniform(2.0, 3.5))  # Paced intervals to limit IP flagging risks
                 
                 try:
                     search_results = ddgs.text(query, max_results=15)
+                    
+                    # FIXED: Fixed indentation error context logic constraints here
                     if not search_results:
                         continue
                         
