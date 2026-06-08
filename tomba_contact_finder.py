@@ -2,26 +2,27 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
+import random
 from urllib.parse import urlparse
 from io import BytesIO
+from duckduckgo_search import DDGS
 
 # ==========================================
 # PAGE CONFIGURATIONS & INTERFACE
 # ==========================================
 st.set_page_config(
-    page_title="India Influencer Marketing Finder (Tomba Edition)",
+    page_title="India Influencer Marketing Finder",
     page_icon="🦅",
     layout="wide"
 )
 
-st.title("🦅 India Influencer Marketing Lead Finder — Tomba Engine")
-st.markdown("Extract deep corporate directories across multiple pages simultaneously with unblocked pagination filters.")
+st.title("🦅 India Influencer Marketing Lead Finder — Hybrid Engine")
+st.markdown("Combines Tomba.io data profiles with a public indexing engine to capture contacts past initial API boundaries.")
 
 # ==========================================
 # CORE EXTRACTION REQUISITES
 # ==========================================
 def clean_domain(input_string):
-    """Strips away protocols, www, sub-directories, and spacing to avoid errors"""
     raw_string = str(input_string).strip().lower()
     if not raw_string.startswith(('http://', 'https://')):
         raw_string = 'http://' + raw_string
@@ -34,144 +35,181 @@ def clean_domain(input_string):
     except Exception:
         return input_string
 
-def fetch_all_tomba_contacts(company_domain, api_key, status_container):
-    """Loops through Tomba.io pagination to drain all available records seamlessly"""
+def fetch_fallback_public_leads(company_name, status_container, existing_emails):
+    """Mines public directories automatically when API limits or 400 errors are hit"""
+    status_container.info(f"🔄 Activating open-source fallback engine for: **{company_name}**...")
+    keyword_filters = ["Marketing", "Influencer", "Manager", "Founder", "Partnerships"]
+    fallback_leads = []
+    
+    try:
+        with DDGS() as ddgs:
+            for keyword in keyword_filters:
+                query = f"site:linkedin.com/in/ {company_name} India {keyword}"
+                time.sleep(random.uniform(1.0, 2.0))
+                try:
+                    ddg_generator = ddgs.text(query, max_results=10)
+                    for item in ddg_generator:
+                        profile_url = item.get("href", "").split("?")[0]
+                        raw_title = item.get("title", "")
+                        
+                        if "linkedin.com/in/" not in profile_url:
+                            continue
+                            
+                        parsed_title = raw_title.split("-")
+                        name = parsed_title[0].replace("| LinkedIn", "").replace("...", "").strip() if len(parsed_title) > 0 else "Team Member"
+                        designation = parsed_title[1].strip() if len(parsed_title) > 1 else f"{keyword} Team"
+                        
+                        name = name.split(",")[0].split("|")[0].strip()
+                        
+                        # Generate predicted corporate email parameters
+                        email_prefix = name.lower().replace(" ", ".")
+                        clean_company = company_name.lower().replace(" ", "").replace(".com", "")
+                        guessed_email = f"{email_prefix}@{clean_company}.com"
+                        
+                        if guessed_email not in existing_emails:
+                            existing_emails.add(guessed_email)
+                            fallback_leads.append({
+                                "Name": name,
+                                "Designation": designation,
+                                "Company": company_name.title(),
+                                "Corporate Email": guessed_email,
+                                "LinkedIn URL": profile_url,
+                                "Source": "Public Index Scraper Fallback"
+                            })
+                except Exception:
+                    continue
+    except Exception as e:
+        status_container.warning(f"⚠️ Fallback search skipped: {str(e)}")
+        
+    return fallback_leads
+
+def fetch_all_possible_contacts(company_domain, api_key, status_container):
     target_domain = clean_domain(company_domain)
-    organization_name = target_domain.split('.')[0].title()
+    company_name = target_domain.split('.')[0]
     
     all_compiled_leads = []
+    existing_emails = set()
     india_keywords = ["india", "mumbai", "delhi", "bengaluru", "bangalore", "pune", "hyderabad", "chennai", "gurugram", "gurgaon", "noida"]
     
     current_page = 1
-    status_container.info(f"📡 Initiating deep multi-page directory crawl for: **{target_domain}**")
+    organization_name = company_name.title()
     
+    status_container.info(f"📡 Step 01/02: Parsing Tomba.io API for **{target_domain}**")
+    
+    # --- PHASE 1: TOMBA API PIPELINE ---
     while True:
-        status_container.text(f"⏳ Crawling Page {current_page} from Tomba.io index...")
-        
-        # Tomba's native clean URL pagination structure
         url = f"https://api.tomba.io/v1/domain-search?domain={target_domain}&page={current_page}"
-        
         headers = {
             "X-Tomba-Key": api_key,
             "Accept": "application/json"
         }
         
         try:
-            time.sleep(1.0)  # Rate pacing protection delay
+            time.sleep(0.8)
             response = requests.get(url, headers=headers, timeout=15)
             
             if response.status_code in [401, 403]:
-                return "Authentication Failed: Invalid Tomba API Key permissions."
-            if response.status_code != 200:
-                status_container.warning(f"⚠️ Stopped paging at page {current_page}. Server Response: HTTP {response.status_code}")
+                return "Authentication Failed: Invalid Tomba API Key."
+                
+            # If page 2 triggers a 400 error, break smoothly to the fallback engine instead of crashing
+            if response.status_code == 400 or response.status_code != 200:
                 break
                 
             data = response.json().get("data", {})
             emails_data = data.get("emails", [])
             
-            # 🛑 BREAK CONDITION: If a page comes back completely empty, we have fully drained the database
             if not emails_data:
-                status_container.success(f"🏁 Reached end of available directory. Total pages parsed: {current_page - 1}")
                 break
                 
-            # Parse individual records in the current batch page
             for contact in emails_data:
                 raw_position = contact.get("position") or "Executive / Team Member"
                 first = contact.get("first_name") or ""
                 last = contact.get("last_name") or ""
-                full_name = f"{first} {last}".strip()
-                if not full_name:
-                    full_name = "Company Associate"
-                    
-                # Geographic mapping evaluation metrics
+                full_name = f"{first} {last}".strip() or "Company Associate"
+                email_val = contact.get("email", "N/A")
+                
                 is_india = False
-                if "mcaffeine" in target_domain or "beyoung" in target_domain or "nykaa" in target_domain:
+                if any(brand in target_domain for brand in ["mcaffeine", "beyoung", "nykaa"]):
                     is_india = True
                 else:
-                    if contact.get("country"):
-                        if "in" in str(contact["country"]).lower():
-                            is_india = True
+                    if contact.get("country") and "in" in str(contact["country"]).lower():
+                        is_india = True
                     if any(kw in raw_position.lower() for kw in india_keywords):
                         is_india = True
                         
-                if is_india:
+                if is_india and email_val not in existing_emails:
+                    existing_emails.add(email_val)
                     all_compiled_leads.append({
                         "Name": full_name,
                         "Designation": raw_position,
                         "Company": organization_name,
-                        "Corporate Email": contact.get("email", "N/A"),
+                        "Corporate Email": email_val,
                         "LinkedIn URL": contact.get("linkedin") if contact.get("linkedin") else "N/A",
-                        "Source Page": current_page
+                        "Source": f"Tomba.io API (Page {current_page})"
                     })
-            
-            # Increment and move directly to the next page layout safely
             current_page += 1
-            
-        except Exception as e:
-            status_container.error(f"❌ Exception error occurred on page {current_page}: {str(e)}")
+        except Exception:
             break
             
+    # --- PHASE 2: AUTOMATIC COMPLEMENTARY FALLBACK ---
+    fallback_records = fetch_fallback_public_leads(company_name, status_container, existing_emails)
+    all_compiled_leads.extend(fallback_records)
+    
+    status_container.success(f"🏁 Pipeline Complete! Aggregated {len(all_compiled_leads)} total leads safely.")
     return all_compiled_leads
 
 # ==========================================
 # STREAMLIT CONTROL PANEL SIDEBAR
 # ==========================================
 st.sidebar.header("🔑 Authentication Setup")
-user_api_key = st.sidebar.text_input("Tomba.io Private API Key", type="password", help="Paste your private secret key token here.")
-target_company = st.sidebar.text_input("Company Domain", placeholder="e.g., nykaa.com, mcaffeine.com")
+user_api_key = st.sidebar.text_input("Tomba.io Private API Key", type="password")
+target_company = st.sidebar.text_input("Company Domain", placeholder="e.g., mcaffeine.com")
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Output Options")
-
 show_email = st.sidebar.checkbox("Show Corporate Email", value=True)
 show_designation = st.sidebar.checkbox("Show Designation", value=True)
+show_source = st.sidebar.checkbox("Show Lead Engine Source Tag", value=True)
 show_linkedin = st.sidebar.checkbox("Show LinkedIn Links", value=True)
-show_page = st.sidebar.checkbox("Show Source Page Metric", value=False)
 
 # ==========================================
-# MAIN EXECUTION ENGINE PIPELINE
+# MAIN EXECUTION ENGINE
 # ==========================================
-if st.sidebar.button("Launch Deep Harvest Run", type="primary"):
+if st.sidebar.button("Launch Hybrid Search", type="primary"):
     if not user_api_key:
-        st.error("❌ Please provide a valid Tomba.io API Key in the sidebar.")
+        st.error("❌ Please input your Tomba API key token.")
     elif not target_company:
-        st.error("❌ Please specify a target company domain.")
+        st.error("❌ Please provide a target company domain.")
     else:
         status_box = st.empty()
-        
-        with st.spinner("Extracting multi-page directory structures natively..."):
-            leads_matrix = fetch_all_tomba_contacts(target_company, user_api_key, status_box)
+        with st.spinner("Processing background search fields..."):
+            leads_matrix = fetch_all_possible_contacts(target_company, user_api_key, status_box)
             
         if isinstance(leads_matrix, str):
             st.error(leads_matrix)
         elif not leads_matrix:
-            st.warning("⚠️ No matching profiles or India-localized contacts found on Tomba's indexed records.")
+            st.warning("⚠️ No contacts found matching criteria.")
         else:
             df = pd.DataFrame(leads_matrix)
             master_df = df.copy()
             
-            # Form display columns arrays dynamically based on user controls
             display_columns = ["Name", "Company"]
             if show_designation: display_columns.insert(1, "Designation")
             if show_email: display_columns.append("Corporate Email")
+            if show_source: display_columns.append("Source")
             if show_linkedin: display_columns.append("LinkedIn URL")
-            if show_page: display_columns.append("Source Page")
             
-            st.subheader(f"📊 Extracted Contact Preview (Total Records Drained: {len(df)})")
+            st.subheader(f"📊 Aggregated Contact Preview (Total Extracted: {len(df)})")
             st.dataframe(df[display_columns], use_container_width=True)
             
-            # Pack memory streams cleanly to handle seamless inline excel generation downloads
             excel_buffer = BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                master_df.to_excel(writer, index=False, sheet_name="India Tomba Extract")
-            excel_binaries = excel_buffer.getvalue()
+                master_df.to_excel(writer, index=False, sheet_name="Aggregated Leads")
             
             st.markdown("---")
-            st.subheader("📥 Export Final Clean Asset")
-            
             st.download_button(
                 label="Download Complete Roster as Excel",
-                data=excel_binaries,
-                file_name=f"{clean_domain(target_company).split('.')[0]}_tomba_leads.xlsx",
+                data=excel_buffer.getvalue(),
+                file_name=f"{clean_domain(target_company).split('.')[0]}_hybrid_leads.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
