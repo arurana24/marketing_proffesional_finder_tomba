@@ -16,8 +16,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🦅 India Influencer Marketing Lead Finder — Hybrid Engine")
-st.markdown("Combines Tomba.io data profiles with a public indexing engine to capture contacts past initial API boundaries.")
+st.title("🦅 India Influencer Marketing Lead Finder — Production Hybrid Engine")
+st.markdown("Combines fallback API directories with robust open-source web indexing to pull maximum matching leads.")
 
 # ==========================================
 # CORE EXTRACTION REQUISITES
@@ -36,19 +36,26 @@ def clean_domain(input_string):
         return input_string
 
 def fetch_fallback_public_leads(company_name, status_container, existing_emails):
-    """Mines public directories automatically when API limits or 400 errors are hit"""
-    status_container.info(f"🔄 Activating open-source fallback engine for: **{company_name}**...")
+    """Mines public search indexes natively using the updated direct list return format"""
+    status_container.info(f"🔄 Scanning global public indexes for: **{company_name}** employees...")
     keyword_filters = ["Marketing", "Influencer", "Manager", "Founder", "Partnerships"]
     fallback_leads = []
     
     try:
         with DDGS() as ddgs:
             for keyword in keyword_filters:
+                # Keep query tags simple so search indexers understand it perfectly
                 query = f"site:linkedin.com/in/ {company_name} India {keyword}"
                 time.sleep(random.uniform(1.0, 2.0))
+                
                 try:
-                    ddg_generator = ddgs.text(query, max_results=10)
-                    for item in ddg_generator:
+                    # UPDATED: ddgs.text now returns a direct list of dicts, not an iterator
+                    search_results = ddgs.text(query, max_results=15)
+                    
+                    if not search_results:
+                        continue
+                        
+                    for item in search_results:
                         profile_url = item.get("href", "").split("?")[0]
                         raw_title = item.get("title", "")
                         
@@ -57,7 +64,7 @@ def fetch_fallback_public_leads(company_name, status_container, existing_emails)
                             
                         parsed_title = raw_title.split("-")
                         name = parsed_title[0].replace("| LinkedIn", "").replace("...", "").strip() if len(parsed_title) > 0 else "Team Member"
-                        designation = parsed_title[1].strip() if len(parsed_title) > 1 else f"{keyword} Team"
+                        designation = parsed_title[1].strip() if len(parsed_title) > 1 else f"{keyword} Associate"
                         
                         name = name.split(",")[0].split("|")[0].strip()
                         
@@ -79,7 +86,7 @@ def fetch_fallback_public_leads(company_name, status_container, existing_emails)
                 except Exception:
                     continue
     except Exception as e:
-        status_container.warning(f"⚠️ Fallback search skipped: {str(e)}")
+        status_container.warning(f"⚠️ Scraping engine warning skipped: {str(e)}")
         
     return fallback_leads
 
@@ -94,64 +101,59 @@ def fetch_all_possible_contacts(company_domain, api_key, status_container):
     current_page = 1
     organization_name = company_name.title()
     
-    status_container.info(f"📡 Step 01/02: Parsing Tomba.io API for **{target_domain}**")
-    
     # --- PHASE 1: TOMBA API PIPELINE ---
-    while True:
-        url = f"https://api.tomba.io/v1/domain-search?domain={target_domain}&page={current_page}"
-        headers = {
-            "X-Tomba-Key": api_key,
-            "Accept": "application/json"
-        }
-        
-        try:
-            time.sleep(0.8)
-            response = requests.get(url, headers=headers, timeout=15)
-            
-            if response.status_code in [401, 403]:
-                return "Authentication Failed: Invalid Tomba API Key."
+    if api_key:
+        status_container.info(f"📡 Step 01/02: Querying API directories for **{target_domain}**")
+        while True:
+            url = f"https://api.tomba.io/v1/domain-search?domain={target_domain}&page={current_page}"
+            headers = {
+                "X-Tomba-Key": api_key,
+                "Accept": "application/json"
+            }
+            try:
+                time.sleep(0.5)
+                response = requests.get(url, headers=headers, timeout=15)
                 
-            # If page 2 triggers a 400 error, break smoothly to the fallback engine instead of crashing
-            if response.status_code == 400 or response.status_code != 200:
+                if response.status_code in [401, 403, 400] or response.status_code != 200:
+                    break
+                    
+                data = response.json().get("data", {})
+                emails_data = data.get("emails", [])
+                
+                if not emails_data:
+                    break
+                    
+                for contact in emails_data:
+                    raw_position = contact.get("position") or "Executive / Team Member"
+                    first = contact.get("first_name") or ""
+                    last = contact.get("last_name") or ""
+                    full_name = f"{first} {last}".strip() or "Company Associate"
+                    email_val = contact.get("email", "N/A")
+                    
+                    is_india = False
+                    if any(brand in target_domain for brand in ["mcaffeine", "beyoung", "nykaa"]):
+                        is_india = True
+                    else:
+                        if contact.get("country") and "in" in str(contact["country"]).lower():
+                            is_india = True
+                        if any(kw in raw_position.lower() for kw in india_keywords):
+                            is_india = True
+                            
+                    if is_india and email_val not in existing_emails:
+                        existing_emails.add(email_val)
+                        all_compiled_leads.append({
+                            "Name": full_name,
+                            "Designation": raw_position,
+                            "Company": organization_name,
+                            "Corporate Email": email_val,
+                            "LinkedIn URL": contact.get("linkedin") if contact.get("linkedin") else "N/A",
+                            "Source": f"Tomba.io API (Page {current_page})"
+                        })
+                current_page += 1
+            except Exception:
                 break
                 
-            data = response.json().get("data", {})
-            emails_data = data.get("emails", [])
-            
-            if not emails_data:
-                break
-                
-            for contact in emails_data:
-                raw_position = contact.get("position") or "Executive / Team Member"
-                first = contact.get("first_name") or ""
-                last = contact.get("last_name") or ""
-                full_name = f"{first} {last}".strip() or "Company Associate"
-                email_val = contact.get("email", "N/A")
-                
-                is_india = False
-                if any(brand in target_domain for brand in ["mcaffeine", "beyoung", "nykaa"]):
-                    is_india = True
-                else:
-                    if contact.get("country") and "in" in str(contact["country"]).lower():
-                        is_india = True
-                    if any(kw in raw_position.lower() for kw in india_keywords):
-                        is_india = True
-                        
-                if is_india and email_val not in existing_emails:
-                    existing_emails.add(email_val)
-                    all_compiled_leads.append({
-                        "Name": full_name,
-                        "Designation": raw_position,
-                        "Company": organization_name,
-                        "Corporate Email": email_val,
-                        "LinkedIn URL": contact.get("linkedin") if contact.get("linkedin") else "N/A",
-                        "Source": f"Tomba.io API (Page {current_page})"
-                    })
-            current_page += 1
-        except Exception:
-            break
-            
-    # --- PHASE 2: AUTOMATIC COMPLEMENTARY FALLBACK ---
+    # --- PHASE 2: FALLBACK UNBLOCKED SEARCH SWEEP ---
     fallback_records = fetch_fallback_public_leads(company_name, status_container, existing_emails)
     all_compiled_leads.extend(fallback_records)
     
@@ -162,8 +164,8 @@ def fetch_all_possible_contacts(company_domain, api_key, status_container):
 # STREAMLIT CONTROL PANEL SIDEBAR
 # ==========================================
 st.sidebar.header("🔑 Authentication Setup")
-user_api_key = st.sidebar.text_input("Tomba.io Private API Key", type="password")
-target_company = st.sidebar.text_input("Company Domain", placeholder="e.g., mcaffeine.com")
+user_api_key = st.sidebar.text_input("Tomba.io Private API Key", type="password", help="Optional key. If blank, app will default fully to unblocked web mining.")
+target_company = st.sidebar.text_input("Company Domain", placeholder="e.g., mcaffeine.com, nykaa.com")
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Output Options")
@@ -176,9 +178,7 @@ show_linkedin = st.sidebar.checkbox("Show LinkedIn Links", value=True)
 # MAIN EXECUTION ENGINE
 # ==========================================
 if st.sidebar.button("Launch Hybrid Search", type="primary"):
-    if not user_api_key:
-        st.error("❌ Please input your Tomba API key token.")
-    elif not target_company:
+    if not target_company:
         st.error("❌ Please provide a target company domain.")
     else:
         status_box = st.empty()
