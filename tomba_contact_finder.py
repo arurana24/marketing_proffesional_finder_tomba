@@ -16,13 +16,15 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🦅 India Influencer Marketing Lead Finder — Production Hybrid Engine")
-st.markdown("Combines fallback API directories with robust open-source web indexing to pull maximum matching leads.")
+st.title("🦅 India Influencer Marketing Lead Finder")
+st.markdown("Combines specialized B2B directory lookups with deep open-source web indexing to isolate target leads.")
+st.markdown("---")
 
 # ==========================================
 # CORE EXTRACTION REQUISITES
 # ==========================================
 def clean_domain(input_string):
+    """Strips away protocols, www, sub-directories, and spacing safely"""
     raw_string = str(input_string).strip().lower()
     if not raw_string.startswith(('http://', 'https://')):
         raw_string = 'http://' + raw_string
@@ -35,23 +37,20 @@ def clean_domain(input_string):
     except Exception:
         return input_string
 
-def fetch_fallback_public_leads(company_name, status_container, existing_emails):
-    """Mines public search indexes natively using the updated direct list return format"""
-    status_container.info(f"🔄 Scanning global public indexes for: **{company_name}** employees...")
+def fetch_fallback_public_leads(company_name, target_domain, status_container, existing_emails):
+    """Mines public search indexes natively using direct vector array parsing"""
+    status_container.info(f"🔄 Deploying open-source search scraper engine for: **{company_name}**...")
     keyword_filters = ["Marketing", "Influencer", "Manager", "Founder", "Partnerships"]
     fallback_leads = []
     
     try:
         with DDGS() as ddgs:
             for keyword in keyword_filters:
-                # Keep query tags simple so search indexers understand it perfectly
                 query = f"site:linkedin.com/in/ {company_name} India {keyword}"
-                time.sleep(random.uniform(1.0, 2.0))
+                time.sleep(random.uniform(1.5, 2.5))  # High-stability human sleep pacing
                 
                 try:
-                    # UPDATED: ddgs.text now returns a direct list of dicts, not an iterator
                     search_results = ddgs.text(query, max_results=15)
-                    
                     if not search_results:
                         continue
                         
@@ -66,9 +65,10 @@ def fetch_fallback_public_leads(company_name, status_container, existing_emails)
                         name = parsed_title[0].replace("| LinkedIn", "").replace("...", "").strip() if len(parsed_title) > 0 else "Team Member"
                         designation = parsed_title[1].strip() if len(parsed_title) > 1 else f"{keyword} Associate"
                         
+                        # Clean special layout characters from Name elements
                         name = name.split(",")[0].split("|")[0].strip()
                         
-                        # Generate predicted corporate email parameters
+                        # Calculate mathematical email prediction formulas
                         email_prefix = name.lower().replace(" ", ".")
                         clean_company = company_name.lower().replace(" ", "").replace(".com", "")
                         guessed_email = f"{email_prefix}@{clean_company}.com"
@@ -101,9 +101,12 @@ def fetch_all_possible_contacts(company_domain, api_key, status_container):
     current_page = 1
     organization_name = company_name.title()
     
+    # Check if domain uses an explicit Indian extension (.in, .co.in, etc.)
+    is_indian_tld = target_domain.endswith(('.in', '.co.in', '.net.in', '.org.in', '.ind.in'))
+    
     # --- PHASE 1: TOMBA API PIPELINE ---
     if api_key:
-        status_container.info(f"📡 Step 01/02: Querying API directories for **{target_domain}**")
+        status_container.info(f"📡 Phase 1/2: Querying structural API registries for **{target_domain}**")
         while True:
             url = f"https://api.tomba.io/v1/domain-search?domain={target_domain}&page={current_page}"
             headers = {
@@ -111,10 +114,10 @@ def fetch_all_possible_contacts(company_domain, api_key, status_container):
                 "Accept": "application/json"
             }
             try:
-                time.sleep(0.5)
+                time.sleep(0.6)
                 response = requests.get(url, headers=headers, timeout=15)
                 
-                if response.status_code in [401, 403, 400] or response.status_code != 200:
+                if response.status_code in [400, 401, 403] or response.status_code != 200:
                     break
                     
                 data = response.json().get("data", {})
@@ -130,8 +133,9 @@ def fetch_all_possible_contacts(company_domain, api_key, status_container):
                     full_name = f"{first} {last}".strip() or "Company Associate"
                     email_val = contact.get("email", "N/A")
                     
+                    # Apply geolocation safety checks dynamically
                     is_india = False
-                    if any(brand in target_domain for brand in ["mcaffeine", "beyoung", "nykaa"]):
+                    if is_indian_tld or any(brand in target_domain for brand in ["mcaffeine", "beyoung", "nykaa", "mamaearth"]):
                         is_india = True
                     else:
                         if contact.get("country") and "in" in str(contact["country"]).lower():
@@ -154,25 +158,29 @@ def fetch_all_possible_contacts(company_domain, api_key, status_container):
                 break
                 
     # --- PHASE 2: FALLBACK UNBLOCKED SEARCH SWEEP ---
-    fallback_records = fetch_fallback_public_leads(company_name, status_container, existing_emails)
+    fallback_records = fetch_fallback_public_leads(company_name, target_domain, status_container, existing_emails)
     all_compiled_leads.extend(fallback_records)
     
-    status_container.success(f"🏁 Pipeline Complete! Aggregated {len(all_compiled_leads)} total leads safely.")
+    status_container.success(f"🏁 Processing Matrix Complete! Compiled {len(all_compiled_leads)} unique rows cleanly.")
     return all_compiled_leads
 
 # ==========================================
 # STREAMLIT CONTROL PANEL SIDEBAR
 # ==========================================
 st.sidebar.header("🔑 Authentication Setup")
-user_api_key = st.sidebar.text_input("Tomba.io Private API Key", type="password", help="Optional key. If blank, app will default fully to unblocked web mining.")
-target_company = st.sidebar.text_input("Company Domain", placeholder="e.g., mcaffeine.com, nykaa.com")
+user_api_key = st.sidebar.text_input(
+    "Tomba.io Private API Key", 
+    type="password", 
+    help="Optional parameter. Leave blank to bypass directory networks and use open web mining directly."
+)
+target_company = st.sidebar.text_input("Company Domain", placeholder="e.g., mcaffeine.com, beyoung.in")
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ Output Options")
+st.sidebar.header("⚙️ Output Configuration Filters")
 show_email = st.sidebar.checkbox("Show Corporate Email", value=True)
 show_designation = st.sidebar.checkbox("Show Designation", value=True)
 show_source = st.sidebar.checkbox("Show Lead Engine Source Tag", value=True)
-show_linkedin = st.sidebar.checkbox("Show LinkedIn Links", value=True)
+show_linkedin = st.sidebar.checkbox("Show LinkedIn Profile Link", value=True)
 
 # ==========================================
 # MAIN EXECUTION ENGINE
@@ -182,29 +190,32 @@ if st.sidebar.button("Launch Hybrid Search", type="primary"):
         st.error("❌ Please provide a target company domain.")
     else:
         status_box = st.empty()
-        with st.spinner("Processing background search fields..."):
+        with st.spinner("Processing background matrix queries..."):
             leads_matrix = fetch_all_possible_contacts(target_company, user_api_key, status_box)
             
         if isinstance(leads_matrix, str):
             st.error(leads_matrix)
         elif not leads_matrix:
-            st.warning("⚠️ No contacts found matching criteria.")
+            st.warning("⚠️ No contacts found matching criteria details.")
         else:
             df = pd.DataFrame(leads_matrix)
             master_df = df.copy()
             
+            # Map dynamic layout configurations cleanly
             display_columns = ["Name", "Company"]
             if show_designation: display_columns.insert(1, "Designation")
             if show_email: display_columns.append("Corporate Email")
             if show_source: display_columns.append("Source")
             if show_linkedin: display_columns.append("LinkedIn URL")
             
+            # Render structured interactive display dataframe
             st.subheader(f"📊 Aggregated Contact Preview (Total Extracted: {len(df)})")
             st.dataframe(df[display_columns], use_container_width=True)
             
+            # Parse Excel file using memory bytes arrays natively
             excel_buffer = BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                master_df.to_excel(writer, index=False, sheet_name="Aggregated Leads")
+                master_df.to_excel(writer, index=False, sheet_name="Aggregated Leads Matrix")
             
             st.markdown("---")
             st.download_button(
